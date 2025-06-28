@@ -37,25 +37,39 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # --- Automation Setup Function ---
+# This function adds the non-interactive scripts to the system's crontab.
 setup_automation() {
     printf "\n[INFO]  | Setting up automation with cron...\n"
     
+    # Get the absolute path to the automation scripts
     PROJECT_PATH=$(pwd)
     AUDIT_SCRIPT_PATH="${PROJECT_PATH}/${AUTOMATION_DIR}/weekly_audit.sh"
+    THREAT_SCRIPT_PATH="${PROJECT_PATH}/${AUTOMATION_DIR}/daily_threat_scan.sh"
     
-    if [ ! -f "$AUDIT_SCRIPT_PATH" ]; then
-        printf "[ERROR] | Automation script 'weekly_audit.sh' not found in '${AUTOMATION_DIR}/'. Aborting.\n"
-        printf "[INFO]  | Please ensure 'weekly_audit.sh' exists before setting up automation.\n"
+    # Check if the scripts exist before proceeding
+    if [ ! -f "$AUDIT_SCRIPT_PATH" ] || [ ! -f "$THREAT_SCRIPT_PATH" ]; then
+        printf "[ERROR] | Automation scripts not found in '${AUTOMATION_DIR}/'. Aborting.\n"
+        printf "[INFO]  | Please ensure 'weekly_audit.sh' and 'daily_threat_scan.sh' exist.\n"
         return
     fi
     
+    # Make the automation scripts executable
     chmod +x "$AUDIT_SCRIPT_PATH"
+    chmod +x "$THREAT_SCRIPT_PATH"
+    
+    # Cron job definitions
+    # Run daily threat scan at 4:05 AM every day
+    CRON_THREAT="5 4 * * * ${THREAT_SCRIPT_PATH}"
+    # Run weekly audit at 3:05 AM every Sunday
     CRON_AUDIT="5 3 * * 0 ${AUDIT_SCRIPT_PATH}"
-    (crontab -l 2>/dev/null | grep -v -F "$AUDIT_SCRIPT_PATH" ; echo "$CRON_AUDIT") | crontab -
+    
+    # Add cron jobs, removing old ones first to prevent duplicates
+    (crontab -l 2>/dev/null | grep -v -F "$AUDIT_SCRIPT_PATH" | grep -v -F "$THREAT_SCRIPT_PATH" ; echo "$CRON_THREAT"; echo "$CRON_AUDIT") | crontab -
     
     printf "[OK]    | Cron jobs created/updated successfully.\n"
-    printf "[INFO]  | A full system audit will now run automatically every Sunday at 3:05 AM.\n"
-    printf "[INFO]  | Note: Automatic updates are handled by the 'unattended-upgrades' service, not cron.\n"
+    printf "[INFO]  | A daily threat scan will run at 4:05 AM.\n"
+    printf "[INFO]  | A full system audit will run every Sunday at 3:05 AM.\n"
+    printf "[INFO]  | Note: Automatic updates are handled by the 'unattended-upgrades' service.\n"
     printf "[INFO]  | Check log files in the 'log' directory for results.\n"
 }
 
