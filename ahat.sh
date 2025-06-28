@@ -12,19 +12,21 @@ AUTOMATION_DIR="automation"
 LOG_FILE="${LOG_DIR}/ahat_run_$(date +%Y-%m-%d_%H-%M-%S).log"
 
 # --- Setup ---
-# Create log directory if it doesn't exist
+# Create necessary directories
 mkdir -p "$LOG_DIR"
 mkdir -p "$AUTOMATION_DIR"
+mkdir -p "$MODULES_DIR"
 
 # Redirect all output to screen and log file
 exec > >(tee -a "${LOG_FILE}") 2>&1
 
 # --- Sourcing Modules ---
-if [ -f "${MODULES_DIR}/harden.sh" ] && [ -f "${MODULES_DIR}/audit.sh" ]; then
+if [ -f "${MODULES_DIR}/harden.sh" ] && [ -f "${MODULES_DIR}/audit.sh" ] && [ -f "${MODULES_DIR}/threat_detection.sh" ]; then
     source "${MODULES_DIR}/harden.sh"
     source "${MODULES_DIR}/audit.sh"
+    source "${MODULES_DIR}/threat_detection.sh"
 else
-    printf "[CRITICAL] Core module files not found in '${MODULES_DIR}/'. Exiting.\n"
+    printf "[CRITICAL] Core module files not found in '${MODULES_DIR}/'. Please create them first. Exiting.\n"
     exit 1
 fi
 
@@ -35,29 +37,20 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 # --- Automation Setup Function ---
-# This function adds the non-interactive scripts to the system's crontab.
 setup_automation() {
     printf "\n[INFO]  | Setting up automation with cron...\n"
     
-    # Get the absolute path to the audit script
     PROJECT_PATH=$(pwd)
     AUDIT_SCRIPT_PATH="${PROJECT_PATH}/${AUTOMATION_DIR}/weekly_audit.sh"
     
-    # Check if the audit script exists before proceeding
     if [ ! -f "$AUDIT_SCRIPT_PATH" ]; then
         printf "[ERROR] | Automation script 'weekly_audit.sh' not found in '${AUTOMATION_DIR}/'. Aborting.\n"
         printf "[INFO]  | Please ensure 'weekly_audit.sh' exists before setting up automation.\n"
         return
     fi
     
-    # Make the automation script executable
     chmod +x "$AUDIT_SCRIPT_PATH"
-    
-    # Cron job definition for weekly audit
-    # Run weekly audit at 3:05 AM every Sunday
     CRON_AUDIT="5 3 * * 0 ${AUDIT_SCRIPT_PATH}"
-    
-    # Add cron jobs, removing old ones first to prevent duplicates
     (crontab -l 2>/dev/null | grep -v -F "$AUDIT_SCRIPT_PATH" ; echo "$CRON_AUDIT") | crontab -
     
     printf "[OK]    | Cron jobs created/updated successfully.\n"
@@ -75,6 +68,7 @@ show_main_menu() {
     printf "  Log file for this session: %s\n\n" "$LOG_FILE"
     printf "   [H]ardening Modules (Manual)\n"
     printf "   [A]uditing Modules (Manual)\n"
+    printf "   [T]hreat Detection & Reporting\n"
     printf "   [S]etup Background Automation (Cron for Audits)\n"
     printf "   [Q]uit\n"
     printf "\n"
@@ -90,7 +84,8 @@ run_hardening_menu() {
     printf "6.  Set Secure File Permissions\n"
     printf "7.  Install Malware Scanner (ClamAV)\n"
     printf "8.  Enable System Logging (auditd)\n"
-    printf "9.  Return to Main Menu\n"
+    printf "9.  Setup File Integrity Checker (AIDE)\n"
+    printf "10. Return to Main Menu\n"
     read -p "Select an option: " choice
     case $choice in
         1) apply_all_hardening ;;
@@ -101,7 +96,8 @@ run_hardening_menu() {
         6) set_secure_file_permissions ;;
         7) install_malware_scanner ;;
         8) enable_system_auditing ;;
-        9) return ;;
+        9) setup_file_integrity_checker ;;
+        10) return ;;
         *) printf "[WARN] Invalid option. Returning to menu.\n" ;;
     esac
     read -p "Press [Enter] to continue..."
@@ -119,7 +115,8 @@ run_auditing_menu() {
     printf "7.  Audit For Malware Scanner\n"
     printf "8.  Audit Logging Status\n"
     printf "9.  Audit For Principle of Least Privilege (PoLP)\n"
-    printf "10. Return to Main Menu\n"
+    printf "10. Audit File Integrity Checker (AIDE)\n"
+    printf "11. Return to Main Menu\n"
     read -p "Select an option: " choice
     case $choice in
         1) run_all_audits ;;
@@ -131,23 +128,47 @@ run_auditing_menu() {
         7) audit_malware_scanner_installed ;;
         8) audit_logging_status ;;
         9) audit_least_privilege ;;
-        10) return ;;
+        10) audit_aide_status ;;
+        11) return ;;
         *) printf "[WARN] Invalid option. Returning to menu.\n" ;;
     esac
     read -p "Press [Enter] to continue..."
     run_auditing_menu
 }
 
+run_threat_detection_menu() {
+    printf "\n--- Threat Detection & Reporting ---\n"
+    printf "1.  Generate Consolidated Threat Report\n"
+    printf "2.  Run File Integrity Check (AIDE)\n"
+    printf "3.  Run On-Demand Malware Scan (ClamAV)\n"
+    printf "4.  Analyze Authentication Logs\n"
+    printf "5.  Return to Main Menu\n"
+    read -p "Select an option: " choice
+    case $choice in
+        1) generate_threat_report ;;
+        2) run_file_integrity_check ;;
+        3) run_malware_scan ;;
+        4) analyze_auth_logs ;;
+        5) return ;;
+        *) printf "[WARN] Invalid option. Returning to menu.\n" ;;
+    esac
+    read -p "Press [Enter] to continue..."
+    run_threat_detection_menu
+}
+
 # --- Main Loop ---
 while true; do
     show_main_menu
-    read -p "Select a menu [H/A/S/Q]: " main_choice
+    read -p "Select a menu [H/A/T/S/Q]: " main_choice
     case $main_choice in
         [Hh])
             run_hardening_menu
             ;;
         [Aa])
             run_auditing_menu
+            ;;
+        [Tt])
+            run_threat_detection_menu
             ;;
         [Ss])
             setup_automation

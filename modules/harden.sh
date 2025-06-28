@@ -1,102 +1,185 @@
 #!/bin/bash
 
-# Hardening Module for A.H.A.T.
-# Contains functions to apply security configurations.
+# A.H.A.T. - Automated Hardening & Auditing Toolkit
+#
+# This toolkit applies and audits security configurations on Debian-based systems.
+# It should be run with root privileges.
 
-# --- 1. Update and Patch Management ---
-# [cite_start]Corresponds to: Regularly update the operating system (OS) [cite: 46] [cite_start]and Enable automatic updates where possible to ensure timely patching [cite: 47]
-# This function now sets up the official unattended-upgrades service.
-setup_automatic_updates() {
-    printf "\n[INFO]  | 1. Setting up automatic security updates via unattended-upgrades...\n"
+# --- Configuration ---
+LOG_DIR="log"
+MODULES_DIR="modules"
+AUTOMATION_DIR="automation"
+LOG_FILE="${LOG_DIR}/ahat_run_$(date +%Y-%m-%d_%H-%M-%S).log"
+
+# --- Setup ---
+# Create necessary directories
+mkdir -p "$LOG_DIR"
+mkdir -p "$AUTOMATION_DIR"
+mkdir -p "$MODULES_DIR"
+
+# Redirect all output to screen and log file
+exec > >(tee -a "${LOG_FILE}") 2>&1
+
+# --- Sourcing Modules ---
+if [ -f "${MODULES_DIR}/harden.sh" ] && [ -f "${MODULES_DIR}/audit.sh" ] && [ -f "${MODULES_DIR}/threat_detection.sh" ]; then
+    source "${MODULES_DIR}/harden.sh"
+    source "${MODULES_DIR}/audit.sh"
+    source "${MODULES_DIR}/threat_detection.sh"
+else
+    printf "[CRITICAL] Core module files not found in '${MODULES_DIR}/'. Please create them first. Exiting.\n"
+    exit 1
+fi
+
+# --- Root Check ---
+if [[ $EUID -ne 0 ]]; then
+   printf "[CRITICAL] This script must be run as root. Aborting.\n"
+   exit 1
+fi
+
+# --- Automation Setup Function ---
+setup_automation() {
+    printf "\n[INFO]  | Setting up automation with cron...\n"
     
-    # First, run a manual update to bring the system current
-    printf "[INFO]  |    Running initial system update...\n"
-    apt-get update -y
-    apt-get upgrade -y
+    PROJECT_PATH=$(pwd)
+    AUDIT_SCRIPT_PATH="${PROJECT_PATH}/${AUTOMATION_DIR}/weekly_audit.sh"
     
-    # Install the package if it's not already present
-    printf "[INFO]  |    Installing unattended-upgrades package...\n"
-    apt-get install unattended-upgrades -y
+    if [ ! -f "$AUDIT_SCRIPT_PATH" ]; then
+        printf "[ERROR] | Automation script 'weekly_audit.sh' not found in '${AUTOMATION_DIR}/'. Aborting.\n"
+        printf "[INFO]  | Please ensure 'weekly_audit.sh' exists before setting up automation.\n"
+        return
+    fi
     
-    # Create the configuration file to enable it.
-    printf "[INFO]  |    Creating auto-upgrades configuration...\n"
-    cat > /etc/apt/apt.conf.d/20auto-upgrades << EOF
-APT::Periodic::Update-Package-Lists "1";
-APT::Periodic::Unattended-Upgrade "1";
-EOF
-
-    # Reconfigure the package to apply the new settings
-    dpkg-reconfigure -plow unattended-upgrades
-
-    printf "[OK]    | System is now configured to install security updates automatically.\n"
+    chmod +x "$AUDIT_SCRIPT_PATH"
+    CRON_AUDIT="5 3 * * 0 ${AUDIT_SCRIPT_PATH}"
+    (crontab -l 2>/dev/null | grep -v -F "$AUDIT_SCRIPT_PATH" ; echo "$CRON_AUDIT") | crontab -
+    
+    printf "[OK]    | Cron jobs created/updated successfully.\n"
+    printf "[INFO]  | A full system audit will now run automatically every Sunday at 3:05 AM.\n"
+    printf "[INFO]  | Note: Automatic updates are handled by the 'unattended-upgrades' service, not cron.\n"
+    printf "[INFO]  | Check log files in the 'log' directory for results.\n"
 }
 
-# --- 2. Secure Configuration ---
-# [cite_start]Corresponds to: Configure firewall settings to restrict unnecessary network traffic [cite: 48]
-apply_firewall_rules() {
-    printf "\n[INFO]  | 2a. Configuring firewall (UFW)...\n"
-    ufw default deny incoming
-    ufw default allow outgoing
-    ufw allow ssh
-    echo "y" | ufw enable
-    printf "[OK]    | Firewall is configured and enabled.\n"
+# --- Menu Functions ---
+show_main_menu() {
+    printf "\n"
+    printf "=================================================\n"
+    printf "  A.H.A.T. - Automated Hardening & Auditing Toolkit\n"
+    printf "=================================================\n"
+    printf "  Log file for this session: %s\n\n" "$LOG_FILE"
+    printf "   [H]ardening Modules (Manual)\n"
+    printf "   [A]uditing Modules (Manual)\n"
+    printf "   [T]hreat Detection & Reporting\n"
+    printf "   [S]etup Background Automation (Cron for Audits)\n"
+    printf "   [Q]uit\n"
+    printf "\n"
 }
 
-# [cite_start]Corresponds to: Disable unnecessary services and features [cite: 48]
-disable_unnecessary_services() {
-    printf "\n[INFO]  | 2b. Disabling unnecessary services...\n"
-    systemctl stop telnet.socket
-    systemctl disable telnet.socket
-    printf "[OK]    | Telnet service disabled.\n"
+run_hardening_menu() {
+    printf "\n--- Hardening Modules ---\n"
+    printf "1.  Apply ALL Hardening Modules\n"
+    printf "2.  Setup Automatic Security Updates\n"
+    printf "3.  Configure Firewall (UFW)\n"
+    printf "4.  Disable Unnecessary Services\n"
+    printf "5.  Enforce Strong Password Policies\n"
+    printf "6.  Set Secure File Permissions\n"
+    printf "7.  Install Malware Scanner (ClamAV)\n"
+    printf "8.  Enable System Logging (auditd)\n"
+    printf "9.  Setup File Integrity Checker (AIDE)\n"
+    printf "10. Return to Main Menu\n"
+    read -p "Select an option: " choice
+    case $choice in
+        1) apply_all_hardening ;;
+        2) setup_automatic_updates ;;
+        3) apply_firewall_rules ;;
+        4) disable_unnecessary_services ;;
+        5) enforce_password_policies ;;
+        6) set_secure_file_permissions ;;
+        7) install_malware_scanner ;;
+        8) enable_system_auditing ;;
+        9) setup_file_integrity_checker ;;
+        10) return ;;
+        *) printf "[WARN] Invalid option. Returning to menu.\n" ;;
+    esac
+    read -p "Press [Enter] to continue..."
+    run_hardening_menu
 }
 
-# --- 3. User Accounts and Privileges ---
-# [cite_start]Corresponds to: Use strong passwords [cite: 50]
-enforce_password_policies() {
-    printf "\n[INFO]  | 3. Enforcing strong password policies via PAM...\n"
-    apt-get install libpam-pwquality -y
-    # Set password policies: min length=12, 3 different from old, at least 1 of each credit type
-    sed -i 's/password\s*requisite\s*pam_pwquality.so.*/password requisite pam_pwquality.so retry=3 minlen=12 difok=3 ucredit=-1 lcredit=-1 dcredit=-1 ocredit=-1/' /etc/pam.d/common-password
-    printf "[OK]    | Password policies enforced using libpam-pwquality.\n"
+run_auditing_menu() {
+    printf "\n--- Auditing Modules ---\n"
+    printf "1.  Run ALL Audit Modules\n"
+    printf "2.  Audit Automatic Update Config\n"
+    printf "3.  Audit Firewall Status\n"
+    printf "4.  Audit For Unnecessary Services\n"
+    printf "5.  Audit Password Policies\n"
+    printf "6.  Audit File Permissions\n"
+    printf "7.  Audit For Malware Scanner\n"
+    printf "8.  Audit Logging Status\n"
+    printf "9.  Audit For Principle of Least Privilege (PoLP)\n"
+    printf "10. Audit File Integrity Checker (AIDE)\n"
+    printf "11. Return to Main Menu\n"
+    read -p "Select an option: " choice
+    case $choice in
+        1) run_all_audits ;;
+        2) audit_automatic_updates ;;
+        3) audit_firewall_status ;;
+        4) audit_disabled_services ;;
+        5) audit_password_policies ;;
+        6) audit_file_permissions ;;
+        7) audit_malware_scanner_installed ;;
+        8) audit_logging_status ;;
+        9) audit_least_privilege ;;
+        10) audit_aide_status ;;
+        11) return ;;
+        *) printf "[WARN] Invalid option. Returning to menu.\n" ;;
+    esac
+    read -p "Press [Enter] to continue..."
+    run_auditing_menu
 }
 
-# --- 4. File System Security ---
-# [cite_start]Corresponds to: configure file permissions to restrict access based on user roles [cite: 51]
-set_secure_file_permissions() {
-    printf "\n[INFO]  | 4. Setting secure permissions on critical files...\n"
-    chmod 600 /etc/ssh/sshd_config
-    chmod 640 /etc/shadow
-    chmod 440 /etc/sudoers
-    printf "[OK]    | Permissions set for sshd_config, shadow, and sudoers.\n"
+run_threat_detection_menu() {
+    printf "\n--- Threat Detection & Reporting ---\n"
+    printf "1.  Generate Consolidated Threat Report\n"
+    printf "2.  Run File Integrity Check (AIDE)\n"
+    printf "3.  Run On-Demand Malware Scan (ClamAV)\n"
+    printf "4.  Analyze Authentication Logs\n"
+    printf "5.  Return to Main Menu\n"
+    read -p "Select an option: " choice
+    case $choice in
+        1) generate_threat_report ;;
+        2) run_file_integrity_check ;;
+        3) run_malware_scan ;;
+        4) analyze_auth_logs ;;
+        5) return ;;
+        *) printf "[WARN] Invalid option. Returning to menu.\n" ;;
+    esac
+    read -p "Press [Enter] to continue..."
+    run_threat_detection_menu
 }
 
-# --- 6. Malware Protection ---
-# [cite_start]Corresponds to: Install and configure antivirus software [cite: 55]
-install_malware_scanner() {
-    printf "\n[INFO]  | 6. Installing malware scanner (ClamAV)...\n"
-    apt-get install clamav clamav-daemon -y
-    freshclam # Update signatures
-    printf "[OK]    | ClamAV installed and signatures updated.\n"
-}
-
-# --- 8. Monitoring and Logging ---
-# [cite_start]Corresponds to: Enable auditing and logging to monitor file access and changes [cite: 52] [cite_start]and Enable system logging and monitoring [cite: 57]
-enable_system_auditing() {
-    printf "\n[INFO]  | 8. Installing and enabling system auditing (auditd)...\n"
-    apt-get install auditd -y
-    systemctl enable --now auditd
-    printf "[OK]    | auditd installed and enabled.\n"
-}
-
-# --- Main Hardening Function ---
-apply_all_hardening() {
-    printf "\n[EXEC] === EXECUTING ALL HARDENING MODULES ===\n"
-    setup_automatic_updates
-    apply_firewall_rules
-    disable_unnecessary_services
-    enforce_password_policies
-    set_secure_file_permissions
-    install_malware_scanner
-    enable_system_auditing
-    printf "\n[DONE] === ALL HARDENING MODULES APPLIED ===\n"
-}
+# --- Main Loop ---
+while true; do
+    show_main_menu
+    read -p "Select a menu [H/A/T/S/Q]: " main_choice
+    case $main_choice in
+        [Hh])
+            run_hardening_menu
+            ;;
+        [Aa])
+            run_auditing_menu
+            ;;
+        [Tt])
+            run_threat_detection_menu
+            ;;
+        [Ss])
+            setup_automation
+            read -p "Press [Enter] to continue..."
+            ;;
+        [Qq])
+            printf "Exiting toolkit.\n"
+            exit 0
+            ;;
+        *)
+            printf "[WARN] Invalid selection.\n"
+            ;;
+    esac
+done
