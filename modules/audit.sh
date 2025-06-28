@@ -13,7 +13,7 @@ print_result() {
 }
 
 # --- 1. Audit Automatic Update Configuration ---
-# [cite_start]Audits compliance with: Enable automatic updates where possible [cite: 110]
+# [cite_start]Audits compliance with: Enable automatic updates where possible [cite: 22]
 audit_automatic_updates() {
     printf "\n[CHECK] | 1. Auditing Automatic Update Configuration...\n"
     if dpkg -s unattended-upgrades &> /dev/null; then
@@ -30,7 +30,7 @@ audit_automatic_updates() {
 }
 
 # --- 2. Audit Firewall Status ---
-# [cite_start]Audits compliance with: Configure firewall settings [cite: 112]
+# [cite_start]Audits compliance with: Configure firewall settings [cite: 23]
 audit_firewall_status() {
     printf "\n[CHECK] | 2. Auditing Firewall Status...\n"
     status=$(ufw status | grep -w "Status: active")
@@ -42,19 +42,29 @@ audit_firewall_status() {
 }
 
 # --- 3. Audit For Unnecessary Services ---
-# [cite_start]Audits compliance with: Disable unnecessary services and features [cite: 111]
+# [cite_start]Audits compliance with: Disable unnecessary services and features [cite: 22]
+# This version now reads from the config file.
 audit_disabled_services() {
-    printf "\n[CHECK] | 3. Auditing for unnecessary services...\n"
-    status=$(systemctl is-enabled telnet.socket 2>/dev/null)
-    if [ "$status" = "disabled" ] || [ "$status" = "masked" ]; then
-        print_result "PASS" "Telnet service is disabled."
-    else
-        print_result "FAIL" "Telnet service is enabled."
+    local config_file="config/services.conf"
+    printf "\n[CHECK] | 3. Auditing for unnecessary services from '${config_file}'...\n"
+    if [ ! -f "$config_file" ]; then
+        print_result "FAIL" "Config file not found: ${config_file}"
+        return
     fi
+
+    while IFS= read -r service || [[ -n "$service" ]]; do
+        [[ "$service" =~ ^# ]] || [[ -z "$service" ]] && continue
+        status=$(systemctl is-enabled "$service" 2>/dev/null)
+        if [ "$status" = "disabled" ] || [ "$status" = "masked" ]; then
+            print_result "PASS" "Service '${service}' is disabled."
+        else
+            print_result "FAIL" "Service '${service}' is enabled (Status: ${status})."
+        fi
+    done < "$config_file"
 }
 
 # --- 4. Audit Password Policies ---
-# [cite_start]Audits compliance with: Use strong passwords [cite: 114]
+# [cite_start]Audits compliance with: Use strong passwords [cite: 25]
 audit_password_policies() {
     printf "\n[CHECK] | 4. Auditing Password Policies...\n"
     policy=$(grep "pam_pwquality.so" /etc/pam.d/common-password)
@@ -66,19 +76,33 @@ audit_password_policies() {
 }
 
 # --- 5. Audit File Permissions ---
-# [cite_start]Audits compliance with: configure file permissions [cite: 115]
+# [cite_start]Audits compliance with: configure file permissions [cite: 26]
+# This version now reads from the config file.
 audit_file_permissions() {
-    printf "\n[CHECK] | 5. Auditing Critical File Permissions...\n"
-    sshd_perms=$(stat -c "%a" /etc/ssh/sshd_config)
-    if [ "$sshd_perms" = "600" ]; then
-        print_result "PASS" "/etc/ssh/sshd_config permissions are secure (600)."
-    else
-        print_result "FAIL" "/etc/ssh/sshd_config permissions are not 600 (are $sshd_perms)."
+    local config_file="config/permissions.conf"
+    printf "\n[CHECK] | 5. Auditing Critical File Permissions from '${config_file}'...\n"
+    if [ ! -f "$config_file" ]; then
+        print_result "FAIL" "Config file not found: ${config_file}"
+        return
     fi
+
+    while read -r file mode; do
+        [[ "$file" =~ ^# ]] || [[ -z "$file" ]] && continue
+        if [ -e "$file" ]; then
+            current_perms=$(stat -c "%a" "$file")
+            if [ "$current_perms" = "$mode" ]; then
+                print_result "PASS" "Permissions for '${file}' are correct (${mode})."
+            else
+                print_result "FAIL" "Permissions for '${file}' are incorrect. Is: ${current_perms}, Should be: ${mode}."
+            fi
+        else
+            print_result "WARN" "File not found for audit: ${file}"
+        fi
+    done < "$config_file"
 }
 
 # --- 6. Audit For Malware Scanner ---
-# [cite_start]Audits compliance with: Install and configure antivirus software [cite: 118]
+# [cite_start]Audits compliance with: Install and configure antivirus software [cite: 29]
 audit_malware_scanner_installed() {
     printf "\n[CHECK] | 6. Auditing for Malware Scanner...\n"
     if command -v clamscan &> /dev/null; then
@@ -89,7 +113,7 @@ audit_malware_scanner_installed() {
 }
 
 # --- 7. Audit Logging Status ---
-# [cite_start]Audits compliance with: Enable system logging and monitoring [cite: 121]
+# [cite_start]Audits compliance with: Enable system logging and monitoring [cite: 32]
 audit_logging_status() {
     printf "\n[CHECK] | 7. Auditing Logging Status...\n"
     status=$(systemctl is-active auditd)
@@ -101,7 +125,7 @@ audit_logging_status() {
 }
 
 # --- 8. Audit For Principle of Least Privilege ---
-# [cite_start]Audits compliance with: Implement the principle of least privilege (PoLP) [cite: 113]
+# [cite_start]Audits compliance with: Implement the principle of least privilege (PoLP) [cite: 24]
 audit_least_privilege() {
     printf "\n[CHECK] | 8. Auditing for Principle of Least Privilege (PoLP)...\n"
     privileged_users=$(awk -F: '($3 == 0 && $1 != "root") { print $1 }' /etc/passwd)
